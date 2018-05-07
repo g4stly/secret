@@ -1,99 +1,67 @@
 package main
 
 import (
-	"fmt"
 	"flag"
 	"crypto/aes"
 	"crypto/sha256"
 	"io/ioutil"
+	"log"
 	"os"
 )
 
-var passwd	= flag.String("key", "", "key: the key used to encrypt/decrypt the message")
-var decrypt	= flag.Bool("d", false, "decrypt: decrypt stdin with given key")
-var raw		= flag.Bool("r", false, "raw: do not add whitespace to the end of the output")
+var key		= flag.String("k", "", "key: the key used to encrypt/decrypt the message")
+var encrypt	= flag.Bool("e", true, "encrypt: ecrypt mode")
+var decrypt	= flag.Bool("d", false, "decrypt: decrypt mode")
+var silent	= flag.Bool("s", false, "silent: surpress all output; including fatal errors")
+var verbose	= flag.Bool("v", false, "verbose: print extraneous debug info (to stderr)")
+var raw		= flag.Bool("r", false, "raw: do not append a newline to the output")
 
-func encryptMessage(msg, key []byte) ([]byte, error) {
-	salty_key := sha256.Sum256(key)
-	cipher, err := aes.NewCipher(salty_key[:])
-	if err != nil { return nil, err }
-
-	blockSize := cipher.BlockSize()
-	difference := len(msg) % blockSize
-
-	if difference != 0 {
-		adjustment := blockSize - difference
-		//fmt.Printf("padding from %v to %v with %v zeroes.\n",
-			//len(msg), len(msg) + adjustment, adjustment)
-		for i := 0; i < adjustment ; i++ {
-			msg = append(msg, 1)
-		}
-		//fmt.Printf("msg is now %v bytes long.\n", len(msg))
-	}
-
-	var result []byte
-	for i := 0; i < len(msg) / blockSize; i++ {
-		local_res := make([]byte, blockSize)
-		local_msg := msg[i*blockSize:]
-		cipher.Encrypt(local_res, local_msg)
-
-		result = append(result, local_res...)
-	}
-
-	return result, nil
-}
-
-func decryptMessage(msg, key []byte) ([]byte, error) {
-	salty_key := sha256.Sum256(key)
-	cipher, err := aes.NewCipher(salty_key[:])
-	if err != nil { return nil, err }
-
-	blockSize := cipher.BlockSize()
-	difference := len(msg) % blockSize
-
-	if difference != 0 {
-		adjustment := blockSize - difference
-		//fmt.Printf("padding from %v to %v with %v zeroes.\n",
-			//len(msg), len(msg) + adjustment, adjustment)
-		for i := 0; i < adjustment ; i++ {
-			msg = append(msg, 1)
-		}
-		//fmt.Printf("msg is now %v bytes long.\n", len(msg))
-	}
-
-	var result []byte
-	for i := 0; i < len(msg) / blockSize; i++ {
-		local_res := make([]byte, blockSize)
-		local_msg := msg[i*blockSize:]
-		cipher.Decrypt(local_res, local_msg)
-
-		result = append(result, local_res...)
-	}
-
-	return result, nil
-}
+var out		= log.New(os.Stderr, "secret: ", log.Ltime | log.Lshortfile)
 
 func main() {
+	// parse flags, ensure we have a key
 	flag.Parse()
-
-	if *passwd == "" {
-		fmt.Printf("You must supply a key with the `-key` option.\n")
-		return
+	if *key == "" {
+		out.Fatalf("The `-k` option is mandatory. See `-h` for help.\n")
 	}
 
+	// read from stdin (trim mysterious character at the end)
 	msg, err := ioutil.ReadAll(os.Stdin)
-	if err != nil { panic(err) }
+	if err != nil { out.Fatalf("ReadAll(): %v\n", err) }
+	msg = msg[:len(msg)-1]
 
-	if *decrypt {
-		plaintext, err := decryptMessage(msg[:len(msg)-1], []byte(*passwd))
-		if err != nil { panic(err) }
-		if !*raw { plaintext = append(plaintext, '\n') }
-		os.Stdout.Write(plaintext)
-		return
+	// salt key & create cipher
+	salty_key := sha256.Sum256([]byte(*key))
+	cipher, err := aes.NewCipher(salty_key[:])
+	if err != nil { out.Fatalf("NewCipher(): %v\n", err) }
+
+	blockSize := cipher.BlockSize()
+	difference := len(msg) % blockSize
+
+	// we want the length of our message congruent modulo the block size of our cipher
+	if difference != 0 {
+		adjustment := blockSize - difference
+		for i := 0; i < adjustment ; i++ {
+			msg = append(msg, 0)
+		}
 	}
 
-	ciphertext, err := encryptMessage(msg[:len(msg)-1], []byte(*passwd))
-	if err != nil { panic(err) }
-	if !*raw { ciphertext = append(ciphertext, '\n') }
-	os.Stdout.Write(ciphertext)
+	// get 'er done
+	var result []byte
+	for i := 0; i < len(msg) / blockSize; i++ {
+		local_res := make([]byte, blockSize)
+		local_msg := msg[i*blockSize:]
+
+		if (*decrypt) {
+			cipher.Decrypt(local_res, local_msg)
+		} else { 
+			cipher.Encrypt(local_res, local_msg)
+		}
+
+		result = append(result, local_res...)
+	}
+
+	// output
+	if !*raw { result = append(result, '\n') }
+	os.Stdout.Write(result)
 }
