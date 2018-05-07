@@ -10,13 +10,12 @@ import (
 )
 
 var key		= flag.String("k", "", "key: the key used to encrypt/decrypt the message")
-var encrypt	= flag.Bool("e", true, "encrypt: ecrypt mode")
+var encrypt	= flag.Bool("e", false, "encrypt: ecrypt mode (default)")
 var decrypt	= flag.Bool("d", false, "decrypt: decrypt mode")
-var silent	= flag.Bool("s", false, "silent: surpress all output; including fatal errors")
 var verbose	= flag.Bool("v", false, "verbose: print extraneous debug info (to stderr)")
 var raw		= flag.Bool("r", false, "raw: do not append a newline to the output")
 
-var out		= log.New(os.Stderr, "secret: ", log.Ltime | log.Lshortfile)
+var out		= log.New(os.Stderr, "", log.Ltime | log.Lshortfile)
 
 func main() {
 	// parse flags, ensure we have a key
@@ -52,9 +51,10 @@ func main() {
 		local_res := make([]byte, blockSize)
 		local_msg := msg[i*blockSize:]
 
-		if (*decrypt) {
+		if *decrypt {
+			if *encrypt { out.Printf("What are you doing?") }
 			cipher.Decrypt(local_res, local_msg)
-		} else { 
+		} else {
 			cipher.Encrypt(local_res, local_msg)
 		}
 
